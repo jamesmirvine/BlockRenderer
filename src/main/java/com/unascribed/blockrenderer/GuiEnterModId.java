@@ -42,6 +42,7 @@ public class GuiEnterModId extends Screen {
     public void init() {
         minecraft.keyboardListener.enableRepeatEvents(true);
         text = new TextFieldWidget(font, width / 2 - 100, height / 6 + 50, 200, 20, StringTextComponent.EMPTY);
+        text.setMaxStringLength(4096);
         text.setText(prefill);
 
         addButton(new Button(width / 2 - 100, height / 6 + 120, 98, 20, new TranslationTextComponent("gui.blockrenderer.cancel"),
