@@ -38,6 +38,7 @@ import com.google.common.io.Files;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.LoadingGui;
+import net.minecraft.client.gui.screen.ChatScreen;
 import net.minecraft.client.gui.screen.IngameMenuScreen;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.screen.inventory.ContainerScreen;
@@ -104,6 +105,7 @@ public class ClientRenderHandler {
 					}
 					Slot hovered = null;
 					Screen currentScreen = mc.currentScreen;
+					if (currentScreen instanceof ChatScreen) return;
 					if (currentScreen instanceof ContainerScreen) {
 						hovered = ((ContainerScreen<?>) currentScreen).getSlotUnderMouse();
 					}
