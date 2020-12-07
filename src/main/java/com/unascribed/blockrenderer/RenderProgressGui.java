@@ -8,17 +8,15 @@ import java.util.concurrent.CompletableFuture;
 import javax.annotation.Nonnull;
 
 import com.mojang.blaze3d.matrix.MatrixStack;
-
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.LoadingGui;
-import net.minecraft.item.ItemStack;
 import net.minecraft.util.ColorHelper;
 import net.minecraft.util.Util;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.text.ITextComponent;
 import net.minecraft.util.text.TranslationTextComponent;
 
-public class ProgressBarGui extends LoadingGui {
+public class RenderProgressGui extends LoadingGui {
 
 	private static final int BG = 0xFF263238;
 	private static final int BG_NOALPHA = BG & 0xFFFFFF;
@@ -28,16 +26,16 @@ public class ProgressBarGui extends LoadingGui {
 	private final String joined;
 	private ITextComponent title;
 	private List<ITextComponent> subTitles = Collections.emptyList();
-	private AsyncItemRenderer asyncReloader;
+	private AsyncRenderer renderer;
 	private float progress;
 	private long fadeOutStart = -1;
 	private long fadeInStart = -1;
 	private long start = -1;
 	private int rendered;
-	private ItemStack stack = ItemStack.EMPTY;
+	private RenderTask task = null;
 	private boolean canceled;
 
-	public ProgressBarGui(Minecraft mc, int total, String joined) {
+	public RenderProgressGui(Minecraft mc, int total, String joined) {
 		this.mc = mc;
 		this.total = total;
 		this.joined = joined;
@@ -45,7 +43,7 @@ public class ProgressBarGui extends LoadingGui {
 	}
 
 	public void setFutures(List<CompletableFuture<Void>> futures) {
-		this.asyncReloader = new AsyncItemRenderer(futures);
+		this.renderer = new AsyncRenderer(futures);
 	}
 
 	public void cancel() {
@@ -53,12 +51,12 @@ public class ProgressBarGui extends LoadingGui {
 			canceled = true;
 			title = new TranslationTextComponent("gui.blockrenderer.render_cancelled", rendered, total, total - rendered);
 			subTitles = Collections.emptyList();
-			stack = ItemStack.EMPTY;
-			asyncReloader.cancel();
+			task = null;
+			renderer.cancel();
 		}
 	}
 
-	public void update(ItemStack stack) {
+	public void update(RenderTask task) {
 		rendered++;
 		int remaining = total - rendered;
 		if (remaining > 0) {
@@ -69,13 +67,13 @@ public class ProgressBarGui extends LoadingGui {
 				//Otherwise update the subtitles and the like
 				subTitles = new ArrayList<>();
 				subTitles.add(new TranslationTextComponent("gui.blockrenderer.progress", rendered, total, remaining));
-				subTitles.add(stack.getDisplayName().deepCopy().mergeStyle(stack.getRarity().color));
-				this.stack = stack;
+				subTitles.add(task.getPreviewDisplayName());
+				this.task = task;
 			}
 		} else {
 			title = new TranslationTextComponent("gui.blockrenderer.rendered", total, joined);
 			subTitles = Collections.emptyList();
-			this.stack = ItemStack.EMPTY;
+			this.task = null;
 		}
 	}
 
@@ -87,7 +85,7 @@ public class ProgressBarGui extends LoadingGui {
 		if (start == -1) {
 			start = now;
 		}
-		if ((asyncReloader.asyncPartDone() || mc.currentScreen != null) && fadeInStart == -1) {
+		if ((renderer.asyncPartDone() || mc.currentScreen != null) && fadeInStart == -1) {
 			fadeInStart = now;
 		}
 		float fadeOutTime = fadeOutStart > -1 ? (now - fadeOutStart) / 1000f : -1;
@@ -109,20 +107,20 @@ public class ProgressBarGui extends LoadingGui {
 
 		int barSize = (int)(((Math.min(scaledWidth * 0.75, scaledHeight) * 0.25)*4)/2);
 		int barPosition = (int)(scaledHeight * 0.8325);
-		progress = MathHelper.clamp(progress * 0.95f + asyncReloader.estimateExecutionSpeed() * 0.05f, 0, 1);
+		progress = MathHelper.clamp(progress * 0.95f + renderer.estimateExecutionSpeed() * 0.05f, 0, 1);
 		renderProgressText(matrix, scaledWidth, scaledHeight, a << 24);
 		if (fadeOutTime < 1) {
 			drawProgressBar(matrix, scaledWidth / 2 - barSize, barPosition - 5, scaledWidth / 2 + barSize, barPosition + 5, 1 - MathHelper.clamp(fadeOutTime, 0, 1));
 		} else if (fadeOutTime >= 2) {
 			mc.setLoadingGui(null);
 		}
-		if (fadeOutStart == -1 && asyncReloader.fullyDone() && fadeInTime >= 2) {
+		if (fadeOutStart == -1 && renderer.fullyDone() && fadeInTime >= 2) {
 			fadeOutStart = Util.milliTime();
 			try {
-				asyncReloader.join();
+				renderer.join();
 				mc.ingameGUI.getChatGUI().printChatMessage(new TranslationTextComponent("msg.blockrenderer.rendered", total, joined, now - start));
-			} catch (Throwable throwable) {
-				BlockRenderer.log.warn("Error joining reloader", throwable);
+			} catch (Throwable t) {
+				BlockRenderer.log.warn("Error joining renderer", t);
 			}
 			if (mc.currentScreen != null) {
 				mc.currentScreen.init(mc, scaledWidth, scaledHeight);
@@ -144,16 +142,22 @@ public class ProgressBarGui extends LoadingGui {
 	private void renderProgressText(MatrixStack matrix, int scaledWidth, int scaledHeight, int a) {
 		matrix.push();
 		matrix.scale(2, 2, 0);
-		drawCenteredString(matrix, mc.fontRenderer, title, scaledWidth / 4, scaledHeight / 4 - 24, 0xFFFFFF|a);
+		if (a != 0) {
+			drawCenteredString(matrix, mc.fontRenderer, title, scaledWidth / 4, scaledHeight / 4 - 24, 0xFFFFFF|a);
+		}
 		int subTitleCount = subTitles.size();
 		if (subTitleCount > 0) {
 			matrix.scale(0.5F, 0.5F, 0);
 			int subTitleX = scaledWidth / 2;
 			int subTitleY = scaledHeight / 2;
-			for (int i = 0; i < subTitleCount; i++) {
-				drawCenteredString(matrix, mc.fontRenderer, subTitles.get(i), subTitleX, subTitleY + 20 * (i - 1), 0xFFFFFF|a);
+			if (a != 0) {
+				for (int i = 0; i < subTitleCount; i++) {
+					drawCenteredString(matrix, mc.fontRenderer, subTitles.get(i), subTitleX, subTitleY + 20 * (i - 1), 0xFFFFFF|a);
+				}
 			}
-			mc.getItemRenderer().renderItemAndEffectIntoGUI(stack, subTitleX - 8, subTitleY + 20 * (subTitleCount - 1));
+			if (task != null) {
+				task.renderPreview(matrix, subTitleX - 8, subTitleY + 20 * (subTitleCount - 1));
+			}
 		}
 		matrix.pop();
 	}

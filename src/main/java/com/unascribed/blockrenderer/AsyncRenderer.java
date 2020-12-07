@@ -17,7 +17,7 @@ import net.minecraft.util.Util;
 /**
  * Heavily modified version of AsyncReloader
  */
-public class AsyncItemRenderer implements IAsyncReloader {
+public class AsyncRenderer implements IAsyncReloader {
 
 	private final CompletableFuture<Unit> allAsyncCompleted = new CompletableFuture<>();
 	private final CompletableFuture<List<Void>> resultListFuture;
@@ -27,7 +27,7 @@ public class AsyncItemRenderer implements IAsyncReloader {
 	private final AtomicInteger asyncScheduled = new AtomicInteger();
 	private final AtomicInteger asyncCompleted = new AtomicInteger();
 
-	public AsyncItemRenderer(List<CompletableFuture<Void>> futures) {
+	public AsyncRenderer(List<CompletableFuture<Void>> futures) {
 		sourceFurtures = futures;
 		taskCount = futures.size();
 		taskSet = new HashSet<>(futures);
@@ -40,12 +40,12 @@ public class AsyncItemRenderer implements IAsyncReloader {
 			final CompletableFuture<?> finalWaitFor = waitFor;
 			CompletableFuture<Void> stateFuture = future.thenCompose(backgroundResult -> {
 				Minecraft.getInstance().execute(() -> {
-					AsyncItemRenderer.this.taskSet.remove(future);
-					if (AsyncItemRenderer.this.taskSet.isEmpty()) {
-						AsyncItemRenderer.this.allAsyncCompleted.complete(Unit.INSTANCE);
+					AsyncRenderer.this.taskSet.remove(future);
+					if (AsyncRenderer.this.taskSet.isEmpty()) {
+						AsyncRenderer.this.allAsyncCompleted.complete(Unit.INSTANCE);
 					}
 				});
-				return AsyncItemRenderer.this.allAsyncCompleted.thenCombine(finalWaitFor, (unit, instance) -> null);
+				return AsyncRenderer.this.allAsyncCompleted.thenCombine(finalWaitFor, (unit, instance) -> null);
 			});
 			list.add(stateFuture);
 			waitFor = stateFuture;

@@ -1,7 +1,5 @@
 package com.unascribed.blockrenderer;
 
-import java.awt.Graphics2D;
-import java.awt.geom.AffineTransform;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.nio.ByteBuffer;
@@ -13,7 +11,6 @@ import java.util.List;
 import java.util.Map.Entry;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
@@ -36,6 +33,7 @@ import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 import com.google.common.io.Files;
 
+import net.minecraft.client.MainWindow;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.LoadingGui;
 import net.minecraft.client.gui.screen.ChatScreen;
@@ -45,6 +43,8 @@ import net.minecraft.client.gui.screen.inventory.ContainerScreen;
 import net.minecraft.client.renderer.RenderHelper;
 import net.minecraft.client.settings.KeyBinding;
 import net.minecraft.client.util.InputMappings;
+import net.minecraft.entity.Entity;
+import net.minecraft.entity.EntityType;
 import net.minecraft.inventory.container.Slot;
 import net.minecraft.item.EnchantedBookItem;
 import net.minecraft.item.Item;
@@ -71,6 +71,9 @@ public class ClientRenderHandler {
 	protected boolean down = false;
 	protected String pendingBulkRender;
 	protected int pendingBulkRenderSize;
+	protected boolean pendingBulkItems;
+	protected boolean pendingBulkEntities;
+	protected boolean pendingBulkStructures;
 	private float oldZLevel;
 
 	public ClientRenderHandler() {
@@ -86,17 +89,17 @@ public class ClientRenderHandler {
 		if (e.phase == Phase.START) {
 			Minecraft mc = Minecraft.getInstance();
 			LoadingGui loadingGui = mc.getLoadingGui();
-			if (loadingGui instanceof ProgressBarGui && InputMappings.isKeyDown(Minecraft.getInstance().getMainWindow().getHandle(), GLFW.GLFW_KEY_ESCAPE)) {
+			if (loadingGui instanceof RenderProgressGui && InputMappings.isKeyDown(Minecraft.getInstance().getMainWindow().getHandle(), GLFW.GLFW_KEY_ESCAPE)) {
 				//If we are currently rendering our progress bar and the user hit escapes, cancel the bulk rendering
-				((ProgressBarGui) loadingGui).cancel();
+				((RenderProgressGui) loadingGui).cancel();
 				return;
 			}
 			if (pendingBulkRender != null) {
 				//We *must* call render code in pre-render. If we don't, it won't work right.
-				bulkRender(pendingBulkRender, pendingBulkRenderSize);
+				bulkRender(pendingBulkRender, pendingBulkRenderSize, pendingBulkItems, pendingBulkEntities, pendingBulkStructures);
 				pendingBulkRender = null;
 			}
-			if (isKeyDown(bind)) {
+			if (bind.isKeyDown()) {
 				if (!down) {
 					down = true;
 					if (mc.world == null) {
@@ -115,7 +118,7 @@ public class ClientRenderHandler {
 						if (hovered != null && hovered.getHasStack()) {
 							modId = hovered.getStack().getItem().getRegistryName().getNamespace();
 						}
-						mc.displayGuiScreen(new GuiEnterModId(mc.currentScreen, modId));
+						mc.displayGuiScreen(new GuiConfigureRender(mc.currentScreen, modId));
 					} else if (currentScreen instanceof ContainerScreen) {
 						if (hovered == null) {
 							mc.ingameGUI.getChatGUI().printChatMessage(new TranslationTextComponent("msg.blockrenderer.slot.absent"));
@@ -128,7 +131,7 @@ public class ClientRenderHandler {
 								if (Screen.hasShiftDown()) {
 									size = (int) (16 * mc.getMainWindow().getGuiScaleFactor());
 								}
-								mc.ingameGUI.getChatGUI().printChatMessage(render(mc, stack, size, new File("renders"), true));
+								mc.ingameGUI.getChatGUI().printChatMessage(render(mc, new ItemRenderTask(stack), size, new File("renders/items"), true));
 							}
 						}
 					} else {
@@ -141,43 +144,62 @@ public class ClientRenderHandler {
 		}
 	}
 
-	private void bulkRender(String modidSpec, int size) {
+	private void bulkRender(String modidSpec, int size, boolean items, boolean entities, boolean structures) {
 		Minecraft mc = Minecraft.getInstance();
 		mc.displayGuiScreen(new IngameMenuScreen(true));
 		Set<String> modIds = Sets.newHashSet();
 		for (String str : modidSpec.split(",")) {
 			modIds.add(str.trim());
 		}
-		List<ItemStack> toRender = new ArrayList<>();
+		List<RenderTask> toRender = new ArrayList<>();
 		NonNullList<ItemStack> li = NonNullList.create();
 		boolean wildcard = modIds.contains("*");
-		for (Entry<RegistryKey<Item>, Item> entry : ForgeRegistries.ITEMS.getEntries()) {
-			if (wildcard || modIds.contains(entry.getKey().getLocation().getNamespace())) {
-				li.clear();
-				Item item = entry.getValue();
-				ItemGroup group = item.getGroup();
-				if (group == null && item instanceof EnchantedBookItem) {
-					//Vanilla has special handing for filling the enchanted book item's group, so just grab a single enchanted book
-					li.add(new ItemStack(item));
-				} else {
-					try {
-						item.fillItemGroup(group, li);
-					} catch (Throwable t) {
-						BlockRenderer.log.warn("Failed to get renderable items for {} and group {}", item.getRegistryName(), group, t);
+		if (items) {
+			for (Entry<RegistryKey<Item>, Item> entry : ForgeRegistries.ITEMS.getEntries()) {
+				if (wildcard || modIds.contains(entry.getKey().getLocation().getNamespace())) {
+					li.clear();
+					Item item = entry.getValue();
+					ItemGroup group = item.getGroup();
+					if (group == null && item instanceof EnchantedBookItem) {
+						//Vanilla has special handing for filling the enchanted book item's group, so just grab a single enchanted book
+						li.add(new ItemStack(item));
+					} else {
+						try {
+							item.fillItemGroup(group, li);
+						} catch (Throwable t) {
+							BlockRenderer.log.warn("Failed to get renderable items for {} and group {}", item.getRegistryName(), group, t);
+						}
+					}
+					for (ItemStack is : li) {
+						toRender.add(new ItemRenderTask(is));
 					}
 				}
-				toRender.addAll(li);
+			}
+		}
+		if (entities) {
+			for (Entry<RegistryKey<EntityType<?>>, EntityType<?>> entry : ForgeRegistries.ENTITIES.getEntries()) {
+				if (wildcard || modIds.contains(entry.getKey().getLocation().getNamespace())) {
+					li.clear();
+					EntityType<?> entityType = entry.getValue();
+					try {
+						Entity e = entityType.create(mc.world);
+						if (e == null) continue;
+						toRender.add(new EntityRenderTask(e));
+					} catch (Throwable t) {
+						BlockRenderer.log.warn("Failed to get renderable entity for {}", entry.getKey().getRegistryName());
+					}
+				}
 			}
 		}
 		File folder = new File("renders/" + dateFormat.format(new Date()) + "_" + sanitize(modidSpec) + "/");
-		ProgressBarGui progressBar = new ProgressBarGui(mc, toRender.size(), Joiner.on(", ").join(modIds));
+		RenderProgressGui progressBar = new RenderProgressGui(mc, toRender.size(), Joiner.on(", ").join(modIds));
 		List<CompletableFuture<Void>> futures = new ArrayList<>();
 		//Create futures for generating and saving the images for each item
 		// we split our items to render into batches, and then delay each batch
 		// by batchIndex + 1. This allows us to have our progress bar properly
 		// render instead of us freezing the game trying to render all the items
 		// during a single tick
-		List<List<ItemStack>> batchedLists = Lists.partition(toRender, 7);
+		List<List<RenderTask>> batchedLists = Lists.partition(toRender, 10);
 		for (int batchIndex = 0, batchedCount = batchedLists.size(); batchIndex < batchedCount; batchIndex++) {
 			futures.add(createFuture(batchedLists.get(batchIndex), size, folder, false, batchIndex + 1, progressBar));
 		}
@@ -191,23 +213,19 @@ public class ClientRenderHandler {
 		// to be within the window's bounds. If we didn't do this, the results
 		// of our readPixels up ahead would be undefined. And nobody likes
 		// undefined behavior.
-		int size = Math.min(Math.min(mc.getMainWindow().getHeight(), mc.getMainWindow().getWidth()), desiredSize);
+		MainWindow window = mc.getMainWindow();
+		int size = Math.min(Math.min(window.getHeight(), window.getWidth()), desiredSize);
 
 		//Switches from 3D to 2D
 		RenderSystem.clear(GL11.GL_DEPTH_BUFFER_BIT, Minecraft.IS_RUNNING_ON_MAC);
 		RenderSystem.matrixMode(GL11.GL_PROJECTION);
 		RenderSystem.loadIdentity();
-		RenderSystem.ortho(0.0D, Minecraft.getInstance().getMainWindow().getScaledWidth(), Minecraft.getInstance().getMainWindow().getScaledHeight(),
-				0.0D, 1000.0D, 3000.0D);
+		RenderSystem.ortho(0, window.getWidth(), window.getHeight(), 0, 1000, 3000);
 		RenderSystem.matrixMode(GL11.GL_MODELVIEW);
 		RenderSystem.loadIdentity();
 		RenderSystem.translatef(0.0F, 0.0F, -2000.0F);
 		RenderHelper.enableStandardItemLighting();
-		//The GUI scale affects us due to the call to setupOverlayRendering
-		// above. As such, we need to counteract this to always get a 512x512
-		// render. We could manually switch to orthogonal mode, but it's just
-		// more convenient to leverage setupOverlayRendering.
-		double scale = size / (16 * mc.getMainWindow().getGuiScaleFactor());
+		double scale = size / (16D);
 		RenderSystem.translated(0, 0, -(scale * 100));
 
 		RenderSystem.scaled(scale, scale, scale);
@@ -234,25 +252,25 @@ public class ClientRenderHandler {
 		RenderSystem.popMatrix();
 	}
 
-	private ITextComponent render(Minecraft mc, ItemStack stack, int size, File folder, boolean includeDateInFilename) {
-		//Draw and read image on main thread
+	private ITextComponent render(Minecraft mc, RenderTask task, int size, File folder, boolean includeDateInFilename) {
 		setUpRenderState(mc, size);
 		RenderSystem.clearColor(0, 0, 0, 0);
 		RenderSystem.clear(GL11.GL_COLOR_BUFFER_BIT | GL11.GL_DEPTH_BUFFER_BIT, Minecraft.IS_RUNNING_ON_MAC);
-		mc.getItemRenderer().renderItemAndEffectIntoGUI(stack, 0, 0);
-		BufferedImage image = readPixels(size, size);
-		tearDownRenderState();
 		try {
-			//And then save the image off thread
-			File file = CompletableFuture.supplyAsync(() -> saveImage(image, stack, folder, includeDateInFilename), Util.getServerExecutor()).get();
-			return new TranslationTextComponent("msg.blockrenderer.render.success", file.getPath());
-		} catch (InterruptedException | ExecutionException ex) {
-			ex.printStackTrace();
+			task.render(size);
+		} catch (Throwable t) {
+			BlockRenderer.log.warn("Failed to render "+task.getId(), t);
 			return new TranslationTextComponent("msg.blockrenderer.render.fail");
 		}
+		BufferedImage image = readPixels(size, size);
+		tearDownRenderState();
+		// This code would need to be refactored to perform this save off-thread and not block the
+		// main thread. This is a problem for later.
+		File file = saveImage(image, task, folder, includeDateInFilename);
+		return new TranslationTextComponent("msg.blockrenderer.render.success", file.getPath());
 	}
 
-	private CompletableFuture<Void> createFuture(List<ItemStack> stacks, int size, File folder, boolean includeDateInFilename, int tickDelay, ProgressBarGui progressBar) {
+	private CompletableFuture<Void> createFuture(List<RenderTask> tasks, int size, File folder, boolean includeDateInFilename, int tickDelay, RenderProgressGui progressBar) {
 		Executor gameExecutor;
 		if (tickDelay == 0) {
 			gameExecutor = Minecraft.getInstance();
@@ -267,34 +285,32 @@ public class ClientRenderHandler {
 			// render the entire batch gathering the images for it
 			// and revert the render state
 			setUpRenderState(Minecraft.getInstance(), size);
-			List<Pair<ItemStack, BufferedImage>> images = new ArrayList<>();
-			for (ItemStack stack : stacks) {
+			List<Pair<RenderTask, BufferedImage>> images = new ArrayList<>();
+			for (RenderTask task : tasks) {
 				RenderSystem.clearColor(0, 0, 0, 0);
 				RenderSystem.clear(GL11.GL_COLOR_BUFFER_BIT | GL11.GL_DEPTH_BUFFER_BIT, Minecraft.IS_RUNNING_ON_MAC);
-				Minecraft.getInstance().getItemRenderer().renderItemAndEffectIntoGUI(stack, 0, 0);
-				images.add(Pair.of(stack, readPixels(size, size)));
+				task.render(size);
+				images.add(Pair.of(task, readPixels(size, size)));
 				//Update the progress bar
-				progressBar.update(stack);
+				progressBar.update(task);
 			}
 			tearDownRenderState();
 			return images;
 		}, gameExecutor).thenAcceptAsync(images -> {
 			//Save images off thread
-			for (Pair<ItemStack, BufferedImage> image : images) {
-				saveImage(image.getSecond(), image.getFirst(), folder, includeDateInFilename);
+			int types = 0;
+			if (pendingBulkItems) types++;
+			if (pendingBulkEntities) types++;
+			if (pendingBulkStructures) types++;
+			for (Pair<RenderTask, BufferedImage> image : images) {
+				saveImage(image.getSecond(), image.getFirst(), types > 1 ? new File(folder, image.getFirst().getCategory()) : folder, includeDateInFilename);
 			}
 		}, Util.getServerExecutor());
 	}
 
-	private static File saveImage(BufferedImage image, ItemStack stack, File folder, boolean includeDateInFilename) {
+	private static File saveImage(BufferedImage image, RenderTask task, File folder, boolean includeDateInFilename) {
 		try {
-			//We need to flip the image over here, because again, GL Y-zero is
-			// the bottom, so it's "Y-up". Minecraft's Y-zero is the top, so it's
-			// "Y-down". Since readPixels is Y-up, our Y-down render is flipped.
-			// It's easier to do this operation on the resulting image than to
-			// do it with GL transforms. Not faster, just easier.
-			BufferedImage flipped = createFlipped(image);
-			String fileName = (includeDateInFilename ? dateFormat.format(new Date()) + "_" : "") + sanitize(stack.getDisplayName().getString());
+			String fileName = (includeDateInFilename ? dateFormat.format(new Date()) + "_" : "") + sanitize(task.getDisplayName());
 			File f = new File(folder, fileName + ".png");
 			int i = 2;
 			while (f.exists()) {
@@ -303,7 +319,7 @@ public class ClientRenderHandler {
 			}
 			Files.createParentDirs(f);
 			f.createNewFile();
-			ImageIO.write(flipped, "PNG", f);
+			ImageIO.write(image, "PNG", f);
 			return f;
 		} catch (Exception e) {
 			e.printStackTrace();
@@ -316,57 +332,17 @@ public class ClientRenderHandler {
 	}
 
 	private static BufferedImage readPixels(int width, int height) {
-		//Allocate a native data array to fit our pixels
 		ByteBuffer buf = BufferUtils.createByteBuffer(width * height * 4);
-		//And finally read the pixel data from the GPU...
 		RenderSystem.readPixels(0, Minecraft.getInstance().getMainWindow().getHeight() - height, width, height, GL12.GL_BGRA, GL11.GL_UNSIGNED_BYTE, buf);
-		//...and turn it into a Java object we can do things to.
 		BufferedImage img = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
 		int[] pixels = new int[width * height];
 		buf.asIntBuffer().get(pixels);
-		img.setRGB(0, 0, width, height, pixels, 0, width);
+		// Load the pixels into the BufferedImage, flipped vertically as OpenGL and
+		// Minecraft disagree about which way is up
+		for (int y = 0; y < height; y++) {
+			img.setRGB(0, (height-1)-y, width, 1, pixels, y*width, width);
+		}
 		return img;
 	}
 
-	private static BufferedImage createFlipped(BufferedImage image) {
-		AffineTransform at = new AffineTransform();
-		//Creates a compound affine transform, instead of just one, as we need
-		// to perform two transformations.
-		// The first one is to scale the image to 100% width, and -100% height.
-		// (That's *negative* 100%.)
-		at.concatenate(AffineTransform.getScaleInstance(1, -1));
-		//We then need to translate the image back up by it's height, as flipping
-		// it over moves it off the bottom of the canvas.
-		at.concatenate(AffineTransform.getTranslateInstance(0, -image.getHeight()));
-		return createTransformed(image, at);
-	}
-
-	private static BufferedImage createTransformed(BufferedImage image, AffineTransform at) {
-		// Create a blank image with the same dimensions as the old one...
-		BufferedImage newImage = new BufferedImage(image.getWidth(), image.getHeight(), BufferedImage.TYPE_INT_ARGB);
-		// ...get it's renderer...
-		Graphics2D g = newImage.createGraphics();
-		/// ...and draw the old image on top of it with our transform.
-		g.transform(at);
-		g.drawImage(image, 0, 0, null);
-		g.dispose();
-		return newImage;
-	}
-
-	private static boolean isKeyDown(KeyBinding keyBinding) {
-		InputMappings.Input key = keyBinding.getKey();
-		int keyCode = key.getKeyCode();
-		if (keyCode != InputMappings.INPUT_INVALID.getKeyCode()) {
-			long windowHandle = Minecraft.getInstance().getMainWindow().getHandle();
-			try {
-				if (key.getType() == InputMappings.Type.KEYSYM) {
-					return InputMappings.isKeyDown(windowHandle, keyCode);
-				} else if (key.getType() == InputMappings.Type.MOUSE) {
-					return GLFW.glfwGetMouseButton(windowHandle, keyCode) == GLFW.GLFW_PRESS;
-				}
-			} catch (Exception ignored) {
-			}
-		}
-		return false;
-	}
 }

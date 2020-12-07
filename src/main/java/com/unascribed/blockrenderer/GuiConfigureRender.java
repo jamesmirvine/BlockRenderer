@@ -5,7 +5,6 @@ import javax.annotation.Nonnull;
 import org.lwjgl.glfw.GLFW;
 
 import com.mojang.blaze3d.matrix.MatrixStack;
-
 import com.google.common.base.Strings;
 
 import net.minecraft.client.Minecraft;
@@ -13,12 +12,13 @@ import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.widget.AbstractSlider;
 import net.minecraft.client.gui.widget.TextFieldWidget;
 import net.minecraft.client.gui.widget.button.Button;
+import net.minecraft.client.resources.I18n;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.text.ITextComponent;
 import net.minecraft.util.text.StringTextComponent;
 import net.minecraft.util.text.TranslationTextComponent;
 
-public class GuiEnterModId extends Screen {
+public class GuiConfigureRender extends Screen {
 
 	private final String prefill;
 	private final Screen old;
@@ -27,7 +27,7 @@ public class GuiEnterModId extends Screen {
 	private double sliderValue;
 	private boolean fixSliderMax;
 
-	public GuiEnterModId(Screen old, String prefill) {
+	public GuiConfigureRender(Screen old, String prefill) {
 		super(StringTextComponent.EMPTY);
 		this.old = old;
 		this.prefill = Strings.nullToEmpty(prefill);
@@ -55,7 +55,7 @@ public class GuiEnterModId extends Screen {
 		addButton(new Button(width / 2 + 2, height / 6 + 120, 98, 20, new TranslationTextComponent("gui.blockrenderer.render"), button -> render()));
 		slider = addButton(new Slider(width / 2 - 100, height / 6 + 80, 200, 20, new TranslationTextComponent("gui.blockrenderer.render_size"),
 				sliderValue, 16, getSliderMax()));
-
+		
 		text.setFocused2(true);
 		text.setCanLoseFocus(false);
 	}
@@ -78,8 +78,13 @@ public class GuiEnterModId extends Screen {
 	@Override
 	public void render(@Nonnull MatrixStack matrix, int mouseX, int mouseY, float partialTicks) {
 		renderBackground(matrix);
+		if (text.getText().isEmpty()) {
+			text.setSuggestion(I18n.format("gui.blockrenderer.namespace"));
+		} else {
+			text.setSuggestion("");
+		}
 		super.render(matrix, mouseX, mouseY, partialTicks);
-		drawCenteredString(matrix, minecraft.fontRenderer, new TranslationTextComponent("gui.blockrenderer.enter_modid"), width / 2, height / 6, -1);
+		drawCenteredString(matrix, minecraft.fontRenderer, new TranslationTextComponent("gui.blockrenderer.configure"), width / 2, height / 6, -1);
 		int displayWidth = minecraft.getMainWindow().getWidth();
 		int displayHeight = minecraft.getMainWindow().getHeight();
 		boolean widthCap = (displayWidth < 2048);
@@ -109,6 +114,9 @@ public class GuiEnterModId extends Screen {
 		if (minecraft.world != null) {
 			BlockRenderer.renderHandler.pendingBulkRender = text.getText();
 			BlockRenderer.renderHandler.pendingBulkRenderSize = round(sliderValue);
+			BlockRenderer.renderHandler.pendingBulkItems = true;
+			BlockRenderer.renderHandler.pendingBulkEntities = false;
+			BlockRenderer.renderHandler.pendingBulkStructures = false;
 		}
 		minecraft.displayGuiScreen(old);
 	}
@@ -176,7 +184,7 @@ public class GuiEnterModId extends Screen {
 
 		@Override
 		protected void func_230979_b_() {
-			setMessage(new TranslationTextComponent("gui.blockrenderer.selected_dimensions", round(GuiEnterModId.this.sliderValue)));
+			setMessage(new TranslationTextComponent("gui.blockrenderer.selected_dimensions", round(GuiConfigureRender.this.sliderValue)));
 		}
 
 		private double denormalizeValue() {
@@ -185,7 +193,7 @@ public class GuiEnterModId extends Screen {
 
 		@Override
 		protected void func_230972_a_() {
-			GuiEnterModId.this.sliderValue = denormalizeValue();
+			GuiConfigureRender.this.sliderValue = denormalizeValue();
 		}
 
 		protected void updateSliderMax(double maxValue) {

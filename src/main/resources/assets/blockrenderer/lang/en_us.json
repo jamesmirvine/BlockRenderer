@@ -7,11 +7,17 @@
 
   "msg.blockrenderer.slot.empty": "That slot has no item.",
   "msg.blockrenderer.slot.absent": "There's no slot there.",
-  "msg.blockrenderer.not_container": "Can't find an item to render.",
-  "msg.blockrenderer.no_world": "You must be in a world to render items.",
+  "msg.blockrenderer.not_container": "Can't find anything to render.",
+  "msg.blockrenderer.no_world": "You must be in a world to render things.",
   "msg.blockrenderer.rendered": "Rendered %1$s items from %2$s in %3$s ms.",
 
-  "gui.blockrenderer.enter_modid": "Enter Mod ID",
+  "gui.blockrenderer.configure": "Configure Render",
+  
+  "gui.blockrenderer.namespace": "Namespace",
+  
+  "gui.blockrenderer.items": "Items & Blocks",
+  "gui.blockrenderer.entities": "Entities",
+  "gui.blockrenderer.structures": "Structures",
 
   "gui.blockrenderer.capped_both": "(Capped at %1$dx%1$d due to your window width and height)",
   "gui.blockrenderer.capped_height": "(Capped at %1$dx%1$d due to your window height)",
@@ -22,8 +28,8 @@
   "gui.blockrenderer.render": "Render",
   "gui.blockrenderer.render_size": "Size",
 
-  "gui.blockrenderer.rendering": "Rendering %1$s items from %2$s",
-  "gui.blockrenderer.rendered": "Rendered %1$s items from %2$s",
+  "gui.blockrenderer.rendering": "Rendering %1$s things from %2$s",
+  "gui.blockrenderer.rendered": "Rendered %1$s things from %2$s",
   "gui.blockrenderer.render_cancelled": "Operation cancelled",
   "gui.blockrenderer.progress": "(%1$s/%2$s, %3$s to go)"
 }
