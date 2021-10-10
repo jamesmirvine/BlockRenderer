@@ -1,12 +1,10 @@
 package com.unascribed.blockrenderer;
 
-import com.mojang.blaze3d.matrix.MatrixStack;
-import com.mojang.blaze3d.systems.RenderSystem;
-
+import com.mojang.blaze3d.vertex.PoseStack;
 import net.minecraft.client.Minecraft;
-import net.minecraft.item.ItemStack;
-import net.minecraft.util.ResourceLocation;
-import net.minecraft.util.text.ITextComponent;
+import net.minecraft.network.chat.Component;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.item.ItemStack;
 
 public class ItemRenderTask extends RenderTask {
 
@@ -22,7 +20,7 @@ public class ItemRenderTask extends RenderTask {
 	}
 	
 	@Override
-	public ITextComponent getPreviewDisplayName() {
+	public Component getPreviewDisplayName() {
 		return stack.getDisplayName();
 	}
 
@@ -37,15 +35,15 @@ public class ItemRenderTask extends RenderTask {
 	}
 
 	@Override
-	public void renderPreview(MatrixStack matrices, int x, int y) {
-		RenderSystem.pushMatrix();
-		Minecraft.getInstance().getItemRenderer().renderItemAndEffectIntoGUI(stack, x, y);
-		RenderSystem.popMatrix();
+	public void renderPreview(PoseStack poseStack, int x, int y) {
+		poseStack.pushPose();
+		Minecraft.getInstance().getItemRenderer().renderAndDecorateItem(stack, x, y);
+		poseStack.popPose();
 	}
 
 	@Override
 	public void render(int renderSize) {
-		Minecraft.getInstance().getItemRenderer().renderItemAndEffectIntoGUI(stack, 0, 0);
+		Minecraft.getInstance().getItemRenderer().renderAndDecorateItem(stack, 0, 0);
 	}
 
 }

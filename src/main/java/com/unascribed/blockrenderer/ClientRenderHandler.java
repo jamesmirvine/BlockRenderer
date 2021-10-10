@@ -5,11 +5,7 @@ import java.io.File;
 import java.nio.ByteBuffer;
 import java.text.DateFormat;
 import java.text.SimpleDateFormat;
-import java.util.ArrayList;
-import java.util.Date;
-import java.util.List;
-import java.util.Map.Entry;
-import java.util.Set;
+import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ScheduledExecutorService;
@@ -18,6 +14,27 @@ import java.util.concurrent.TimeUnit;
 
 import javax.imageio.ImageIO;
 
+import com.mojang.blaze3d.platform.InputConstants;
+import com.mojang.blaze3d.platform.Window;
+import net.minecraft.Util;
+import net.minecraft.client.KeyMapping;
+import net.minecraft.client.gui.screens.ChatScreen;
+import net.minecraft.client.gui.screens.Overlay;
+import net.minecraft.client.gui.screens.PauseScreen;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.gui.screens.inventory.ContainerScreen;
+import net.minecraft.core.NonNullList;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.TranslatableComponent;
+import net.minecraft.resources.ResourceKey;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.inventory.Slot;
+import net.minecraft.world.item.CreativeModeTab;
+import net.minecraft.world.item.EnchantedBookItem;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraftforge.fmlclient.registry.ClientRegistry;
 import org.lwjgl.BufferUtils;
 import org.lwjgl.glfw.GLFW;
 import org.lwjgl.opengl.GL11;
@@ -33,33 +50,11 @@ import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 import com.google.common.io.Files;
 
-import net.minecraft.client.MainWindow;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.LoadingGui;
-import net.minecraft.client.gui.screen.ChatScreen;
-import net.minecraft.client.gui.screen.IngameMenuScreen;
-import net.minecraft.client.gui.screen.Screen;
-import net.minecraft.client.gui.screen.inventory.ContainerScreen;
-import net.minecraft.client.renderer.RenderHelper;
-import net.minecraft.client.settings.KeyBinding;
-import net.minecraft.client.util.InputMappings;
-import net.minecraft.entity.Entity;
-import net.minecraft.entity.EntityType;
-import net.minecraft.inventory.container.Slot;
-import net.minecraft.item.EnchantedBookItem;
-import net.minecraft.item.Item;
-import net.minecraft.item.ItemGroup;
-import net.minecraft.item.ItemStack;
-import net.minecraft.util.NonNullList;
-import net.minecraft.util.RegistryKey;
-import net.minecraft.util.Util;
-import net.minecraft.util.text.ITextComponent;
-import net.minecraft.util.text.TranslationTextComponent;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.TickEvent.Phase;
 import net.minecraftforge.event.TickEvent.RenderTickEvent;
 import net.minecraftforge.eventbus.api.EventPriority;
-import net.minecraftforge.fml.client.registry.ClientRegistry;
 import net.minecraftforge.registries.ForgeRegistries;
 
 public class ClientRenderHandler {
@@ -67,7 +62,7 @@ public class ClientRenderHandler {
 	private static final ScheduledExecutorService SCHEDULER = new ScheduledThreadPoolExecutor(0);
 	private static final DateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd_HH.mm.ss");
 
-	protected KeyBinding bind;
+	protected KeyMapping bind;
 	protected boolean down = false;
 	protected String pendingBulkRender;
 	protected int pendingBulkRenderSize;
@@ -77,7 +72,7 @@ public class ClientRenderHandler {
 	private float oldZLevel;
 
 	public ClientRenderHandler() {
-		bind = new KeyBinding("key.blockrenderer.render", GLFW.GLFW_KEY_GRAVE_ACCENT, "key.blockrenderer.category");
+		bind = new KeyMapping("key.blockrenderer.render", GLFW.GLFW_KEY_GRAVE_ACCENT, "key.blockrenderer.category");
 		ClientRegistry.registerKeyBinding(bind);
 		MinecraftForge.EVENT_BUS.addListener(EventPriority.HIGHEST, this::onFrameStart);
 	}
@@ -88,10 +83,10 @@ public class ClientRenderHandler {
 		// Minecraft renders, as long as we put everything back the way it was.
 		if (e.phase == Phase.START) {
 			Minecraft mc = Minecraft.getInstance();
-			LoadingGui loadingGui = mc.getLoadingGui();
-			if (loadingGui instanceof RenderProgressGui && InputMappings.isKeyDown(Minecraft.getInstance().getMainWindow().getHandle(), GLFW.GLFW_KEY_ESCAPE)) {
+			Overlay loadingOverlay = mc.getOverlay();
+			if (loadingOverlay instanceof RenderProgressGui && InputConstants.isKeyDown(Minecraft.getInstance().getWindow().getWindow(), GLFW.GLFW_KEY_ESCAPE)) {
 				//If we are currently rendering our progress bar and the user hit escapes, cancel the bulk rendering
-				((RenderProgressGui) loadingGui).cancel();
+				((RenderProgressGui) loadingOverlay).cancel();
 				return;
 			}
 			if (pendingBulkRender != null) {
@@ -102,40 +97,40 @@ public class ClientRenderHandler {
 			if (isKeyDown(bind)) {
 				if (!down) {
 					down = true;
-					if (mc.world == null) {
-						mc.ingameGUI.getChatGUI().printChatMessage(new TranslationTextComponent("msg.blockrenderer.no_world"));
+					if (mc.level == null) {
+						mc.gui.getChat().addMessage(new TranslatableComponent("msg.blockrenderer.no_world"));
 						return;
 					}
 					Slot hovered = null;
-					Screen currentScreen = mc.currentScreen;
+					Screen currentScreen = mc.screen;
 					if (currentScreen instanceof ChatScreen) return;
 					if (currentScreen instanceof ContainerScreen) {
-						hovered = ((ContainerScreen<?>) currentScreen).getSlotUnderMouse();
+						hovered = ((ContainerScreen) currentScreen).getSlotUnderMouse();
 					}
 
 					if (Screen.hasControlDown()) {
 						String modId = null;
-						if (hovered != null && hovered.getHasStack()) {
-							modId = hovered.getStack().getItem().getRegistryName().getNamespace();
+						if (hovered != null && hovered.hasItem()) {
+							modId = hovered.getItem().getItem().getRegistryName().getNamespace();
 						}
-						mc.displayGuiScreen(new GuiConfigureRender(mc.currentScreen, modId));
+						mc.setScreen(new GuiConfigureRender(mc.screen, modId));
 					} else if (currentScreen instanceof ContainerScreen) {
 						if (hovered == null) {
-							mc.ingameGUI.getChatGUI().printChatMessage(new TranslationTextComponent("msg.blockrenderer.slot.absent"));
+							mc.gui.getChat().addMessage(new TranslatableComponent("msg.blockrenderer.slot.absent"));
 						} else {
-							ItemStack stack = hovered.getStack();
+							ItemStack stack = hovered.getItem();
 							if (stack.isEmpty()) {
-								mc.ingameGUI.getChatGUI().printChatMessage(new TranslationTextComponent("msg.blockrenderer.slot.empty"));
+								mc.gui.getChat().addMessage(new TranslatableComponent("msg.blockrenderer.slot.empty"));
 							} else {
 								int size = 512;
 								if (Screen.hasShiftDown()) {
-									size = (int) (16 * mc.getMainWindow().getGuiScaleFactor());
+									size = (int) (16 * mc.getWindow().getGuiScale());
 								}
-								mc.ingameGUI.getChatGUI().printChatMessage(render(mc, new ItemRenderTask(stack), size, new File("renders/items"), true));
+								mc.gui.getChat().addMessage(render(mc, new ItemRenderTask(stack), size, new File("renders/items"), true));
 							}
 						}
 					} else {
-						mc.ingameGUI.getChatGUI().printChatMessage(new TranslationTextComponent("msg.blockrenderer.not_container"));
+						mc.gui.getChat().addMessage(new TranslatableComponent("msg.blockrenderer.not_container"));
 					}
 				}
 			} else {
@@ -146,7 +141,7 @@ public class ClientRenderHandler {
 
 	private void bulkRender(String modidSpec, int size, boolean items, boolean entities, boolean structures) {
 		Minecraft mc = Minecraft.getInstance();
-		mc.displayGuiScreen(new IngameMenuScreen(true));
+		mc.setScreen(new PauseScreen(true));
 		Set<String> modIds = Sets.newHashSet();
 		for (String str : modidSpec.split(",")) {
 			modIds.add(str.trim());
@@ -155,19 +150,19 @@ public class ClientRenderHandler {
 		NonNullList<ItemStack> li = NonNullList.create();
 		boolean wildcard = modIds.contains("*");
 		if (items) {
-			for (Entry<RegistryKey<Item>, Item> entry : ForgeRegistries.ITEMS.getEntries()) {
-				if (wildcard || modIds.contains(entry.getKey().getLocation().getNamespace())) {
+			for (Map.Entry<ResourceKey<Item>, Item> entry : ForgeRegistries.ITEMS.getEntries()) {
+				if (wildcard || modIds.contains(entry.getKey().location().getNamespace())) {
 					li.clear();
 					Item item = entry.getValue();
-					ItemGroup group = item.getGroup();
-					if (group == null && item instanceof EnchantedBookItem) {
+					CreativeModeTab category = item.getItemCategory();
+					if (category == null && item instanceof EnchantedBookItem) {
 						//Vanilla has special handing for filling the enchanted book item's group, so just grab a single enchanted book
 						li.add(new ItemStack(item));
 					} else {
 						try {
-							item.fillItemGroup(group, li);
+							item.fillItemCategory(category, li);
 						} catch (Throwable t) {
-							BlockRenderer.log.warn("Failed to get renderable items for {} and group {}", item.getRegistryName(), group, t);
+							BlockRenderer.log.warn("Failed to get renderable items for {} and group {}", item.getRegistryName(), category, t);
 						}
 					}
 					for (ItemStack is : li) {
@@ -177,12 +172,12 @@ public class ClientRenderHandler {
 			}
 		}
 		if (entities) {
-			for (Entry<RegistryKey<EntityType<?>>, EntityType<?>> entry : ForgeRegistries.ENTITIES.getEntries()) {
-				if (wildcard || modIds.contains(entry.getKey().getLocation().getNamespace())) {
+			for (Map.Entry<ResourceKey<EntityType<?>>, EntityType<?>> entry : ForgeRegistries.ENTITIES.getEntries()) {
+				if (wildcard || modIds.contains(entry.getKey().location().getNamespace())) {
 					li.clear();
 					EntityType<?> entityType = entry.getValue();
 					try {
-						Entity e = entityType.create(mc.world);
+						Entity e = entityType.create(mc.level);
 						if (e == null) continue;
 						toRender.add(new EntityRenderTask(e));
 					} catch (Throwable t) {
@@ -204,7 +199,7 @@ public class ClientRenderHandler {
 			futures.add(createFuture(batchedLists.get(batchIndex), size, folder, false, batchIndex + 1, progressBar));
 		}
 		progressBar.setFutures(futures);
-		mc.setLoadingGui(progressBar);
+		mc.setOverlay(progressBar);
 	}
 
 	private void setUpRenderState(Minecraft mc, int desiredSize) {
@@ -213,11 +208,11 @@ public class ClientRenderHandler {
 		// to be within the window's bounds. If we didn't do this, the results
 		// of our readPixels up ahead would be undefined. And nobody likes
 		// undefined behavior.
-		MainWindow window = mc.getMainWindow();
+		Window window = mc.getWindow();
 		int size = Math.min(Math.min(window.getHeight(), window.getWidth()), desiredSize);
 
 		//Switches from 3D to 2D
-		RenderSystem.clear(GL11.GL_DEPTH_BUFFER_BIT, Minecraft.IS_RUNNING_ON_MAC);
+		RenderSystem.clear(GL11.GL_DEPTH_BUFFER_BIT, Minecraft.ON_OSX);
 		RenderSystem.matrixMode(GL11.GL_PROJECTION);
 		RenderSystem.loadIdentity();
 		RenderSystem.ortho(0, window.getWidth(), window.getHeight(), 0, 1000, 3000);
@@ -230,8 +225,8 @@ public class ClientRenderHandler {
 
 		RenderSystem.scaled(scale, scale, scale);
 
-		oldZLevel = mc.getItemRenderer().zLevel;
-		mc.getItemRenderer().zLevel = -50;
+		oldZLevel = mc.getItemRenderer().blitOffset;
+		mc.getItemRenderer().blitOffset = -50;
 
 		RenderSystem.enableRescaleNormal();
 		RenderSystem.enableColorMaterial();
@@ -248,26 +243,26 @@ public class ClientRenderHandler {
 		RenderSystem.disableDepthTest();
 		RenderSystem.disableBlend();
 
-		Minecraft.getInstance().getItemRenderer().zLevel = oldZLevel;
+		Minecraft.getInstance().getItemRenderer().blitOffset = oldZLevel;
 		RenderSystem.popMatrix();
 	}
 
-	private ITextComponent render(Minecraft mc, RenderTask task, int size, File folder, boolean includeDateInFilename) {
+	private Component render(Minecraft mc, RenderTask task, int size, File folder, boolean includeDateInFilename) {
 		setUpRenderState(mc, size);
 		RenderSystem.clearColor(0, 0, 0, 0);
-		RenderSystem.clear(GL11.GL_COLOR_BUFFER_BIT | GL11.GL_DEPTH_BUFFER_BIT, Minecraft.IS_RUNNING_ON_MAC);
+		RenderSystem.clear(GL11.GL_COLOR_BUFFER_BIT | GL11.GL_DEPTH_BUFFER_BIT, Minecraft.ON_OSX);
 		try {
 			task.render(size);
 		} catch (Throwable t) {
 			BlockRenderer.log.warn("Failed to render "+task.getId(), t);
-			return new TranslationTextComponent("msg.blockrenderer.render.fail");
+			return new TranslatableComponent("msg.blockrenderer.render.fail");
 		}
 		BufferedImage image = readPixels(size, size);
 		tearDownRenderState();
 		// This code would need to be refactored to perform this save off-thread and not block the
 		// main thread. This is a problem for later.
 		File file = saveImage(image, task, folder, includeDateInFilename);
-		return new TranslationTextComponent("msg.blockrenderer.render.success", file.getPath());
+		return new TranslatableComponent("msg.blockrenderer.render.success", file.getPath());
 	}
 
 	private CompletableFuture<Void> createFuture(List<RenderTask> tasks, int size, File folder, boolean includeDateInFilename, int tickDelay, RenderProgressGui progressBar) {
@@ -288,7 +283,7 @@ public class ClientRenderHandler {
 			List<Pair<RenderTask, BufferedImage>> images = new ArrayList<>();
 			for (RenderTask task : tasks) {
 				RenderSystem.clearColor(0, 0, 0, 0);
-				RenderSystem.clear(GL11.GL_COLOR_BUFFER_BIT | GL11.GL_DEPTH_BUFFER_BIT, Minecraft.IS_RUNNING_ON_MAC);
+				RenderSystem.clear(GL11.GL_COLOR_BUFFER_BIT | GL11.GL_DEPTH_BUFFER_BIT, Minecraft.ON_OSX);
 				task.render(size);
 				images.add(Pair.of(task, readPixels(size, size)));
 				//Update the progress bar
@@ -305,7 +300,7 @@ public class ClientRenderHandler {
 			for (Pair<RenderTask, BufferedImage> image : images) {
 				saveImage(image.getSecond(), image.getFirst(), types > 1 ? new File(folder, image.getFirst().getCategory()) : folder, includeDateInFilename);
 			}
-		}, Util.getServerExecutor());
+		}, Util.backgroundExecutor());
 	}
 
 	private static File saveImage(BufferedImage image, RenderTask task, File folder, boolean includeDateInFilename) {
@@ -333,7 +328,7 @@ public class ClientRenderHandler {
 
 	private static BufferedImage readPixels(int width, int height) {
 		ByteBuffer buf = BufferUtils.createByteBuffer(width * height * 4);
-		RenderSystem.readPixels(0, Minecraft.getInstance().getMainWindow().getHeight() - height, width, height, GL12.GL_BGRA, GL11.GL_UNSIGNED_BYTE, buf);
+		RenderSystem.readPixels(0, Minecraft.getInstance().getWindow().getHeight() - height, width, height, GL12.GL_BGRA, GL11.GL_UNSIGNED_BYTE, buf);
 		BufferedImage img = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
 		int[] pixels = new int[width * height];
 		buf.asIntBuffer().get(pixels);
@@ -345,15 +340,15 @@ public class ClientRenderHandler {
 		return img;
 	}
 
-	private static boolean isKeyDown(KeyBinding keyBinding) {
-		InputMappings.Input key = keyBinding.getKey();
-		int keyCode = key.getKeyCode();
-		if (keyCode != InputMappings.INPUT_INVALID.getKeyCode()) {
-			long windowHandle = Minecraft.getInstance().getMainWindow().getHandle();
+	private static boolean isKeyDown(KeyMapping KeyMapping) {
+		InputConstants.Key key = KeyMapping.getKey();
+		int keyCode = key.getValue();
+		if (keyCode != InputConstants.UNKNOWN.getValue()) {
+			long windowHandle = Minecraft.getInstance().getWindow().getWindow();
 			try {
-				if (key.getType() == InputMappings.Type.KEYSYM) {
-					return InputMappings.isKeyDown(windowHandle, keyCode);
-				} else if (key.getType() == InputMappings.Type.MOUSE) {
+				if (key.getType() == InputConstants.Type.KEYSYM) {
+					return InputConstants.isKeyDown(windowHandle, keyCode);
+				} else if (key.getType() == InputConstants.Type.MOUSE) {
 					return GLFW.glfwGetMouseButton(windowHandle, keyCode) == GLFW.GLFW_PRESS;
 				}
 			} catch (Exception ignored) {

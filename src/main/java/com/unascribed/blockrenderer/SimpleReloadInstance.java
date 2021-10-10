@@ -9,15 +9,15 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import javax.annotation.Nonnull;
 
+import net.minecraft.Util;
 import net.minecraft.client.Minecraft;
-import net.minecraft.resources.IAsyncReloader;
+import net.minecraft.server.packs.resources.ReloadInstance;
 import net.minecraft.util.Unit;
-import net.minecraft.util.Util;
 
 /**
  * Heavily modified version of AsyncReloader
  */
-public class AsyncRenderer implements IAsyncReloader {
+public class SimpleReloadInstance implements ReloadInstance {
 
 	private final CompletableFuture<Unit> allAsyncCompleted = new CompletableFuture<>();
 	private final CompletableFuture<List<Void>> resultListFuture;
@@ -27,7 +27,7 @@ public class AsyncRenderer implements IAsyncReloader {
 	private final AtomicInteger asyncScheduled = new AtomicInteger();
 	private final AtomicInteger asyncCompleted = new AtomicInteger();
 
-	public AsyncRenderer(List<CompletableFuture<Void>> futures) {
+	public SimpleReloadInstance(List<CompletableFuture<Void>> futures) {
 		sourceFurtures = futures;
 		taskCount = futures.size();
 		taskSet = new HashSet<>(futures);
@@ -40,17 +40,17 @@ public class AsyncRenderer implements IAsyncReloader {
 			final CompletableFuture<?> finalWaitFor = waitFor;
 			CompletableFuture<Void> stateFuture = future.thenCompose(backgroundResult -> {
 				Minecraft.getInstance().execute(() -> {
-					AsyncRenderer.this.taskSet.remove(future);
-					if (AsyncRenderer.this.taskSet.isEmpty()) {
-						AsyncRenderer.this.allAsyncCompleted.complete(Unit.INSTANCE);
+					SimpleReloadInstance.this.taskSet.remove(future);
+					if (SimpleReloadInstance.this.taskSet.isEmpty()) {
+						SimpleReloadInstance.this.allAsyncCompleted.complete(Unit.INSTANCE);
 					}
 				});
-				return AsyncRenderer.this.allAsyncCompleted.thenCombine(finalWaitFor, (unit, instance) -> null);
+				return SimpleReloadInstance.this.allAsyncCompleted.thenCombine(finalWaitFor, (unit, instance) -> null);
 			});
 			list.add(stateFuture);
 			waitFor = stateFuture;
 		}
-		resultListFuture = Util.gather(list);
+		resultListFuture = Util.sequenceFailFast(list);
 	}
 
 	public void cancel() {
@@ -64,30 +64,29 @@ public class AsyncRenderer implements IAsyncReloader {
 
 	@Nonnull
 	@Override
-	public CompletableFuture<Unit> onceDone() {
+	public CompletableFuture<Unit> done() {
 		return resultListFuture.thenApply(result -> Unit.INSTANCE);
 	}
 
 	@Override
-	public float estimateExecutionSpeed() {
+	public float getActualProgress() {
 		int remaining = taskCount - taskSet.size();
 		float completed = 2 * asyncCompleted.get() + remaining;
 		float total = 2 * asyncScheduled.get() + taskCount;
 		return completed / total;
 	}
 
-	@Override
 	public boolean asyncPartDone() {
 		return allAsyncCompleted.isDone();
 	}
 
 	@Override
-	public boolean fullyDone() {
+	public boolean isDone() {
 		return resultListFuture.isDone();
 	}
 
 	@Override
-	public void join() {
+	public void checkExceptions() {
 		if (resultListFuture.isCompletedExceptionally()) {
 			resultListFuture.join();
 		}
